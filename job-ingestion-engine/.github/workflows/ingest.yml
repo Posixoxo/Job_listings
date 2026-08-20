@@ -2,9 +2,8 @@ name: Automated Job Ingestion Pipeline
 
 on:
   schedule:
-    # Runs automatically every day at midnight (00:00 UTC)
     - cron: '0 0 * * *'
-  workflow_dispatch: # Allows manual trigger directly from GitHub UI
+  workflow_dispatch:
 
 jobs:
   run-ingest:
@@ -28,4 +27,5 @@ jobs:
       - name: Run Ingestion Pipeline
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: python ingest.py
+        # Point directly to the python script inside job-ingestion-engine:
+        run: python job-ingestion-engine/ingest.py
