@@ -11,15 +11,15 @@ import {
 } from 'lucide-react';
 import './index.css';
 
-// React component / API utility file:
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+// Get the base backend URL from Vercel env or default to localhost
+const ENV_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
-// Strip any trailing slashes or /api/jobs to normalize the base URL
-const cleanBase = BASE_URL.replace(/\/api\/jobs\/?$/, '').replace(/\/$/, '');
-const API_URL = `${cleanBase}/api/jobs`;
+// Clean out any trailing slashes or existing /api/jobs paths before constructing the endpoint
+const BASE_URL = ENV_URL.replace(/\/api\/jobs\/?$/, '').replace(/\/$/, '');
+const API_URL = `${BASE_URL}/api/jobs`;
 
-// Example fetch call:
-const response = await fetch(`${API_URL}?page=${page}&limit=${limit}&q=${q}`);
+// fetch function:
+const response = await fetch(`${API_URL}?page=${page}&limit=${limit}&q=${q}...`);
 const data = await response.json();
 
 const sanitizeDescription = (rawText) => {
