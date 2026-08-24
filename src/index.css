@@ -91,7 +91,8 @@ body {
   height: 70px;
   width: auto;
   object-fit: contain;
-  margin: 0 auto;
+  justify-content: center;
+  align-items: center;
   cursor: pointer;
 }
 

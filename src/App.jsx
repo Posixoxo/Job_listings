@@ -3,18 +3,17 @@ import {
   MapPin,
   Briefcase,
   ExternalLink,
-  Filter,
   ChevronLeft,
   ChevronRight,
   CheckCircle,
   XCircle,
-  Search,
-  Globe,
   Building2
 } from 'lucide-react';
 import './index.css';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/jobs';
+// Dynamically construct the API URL using your VITE_API_URL environment variable
+const BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/$/, '');
+const API_URL = `${BASE_URL}/api/jobs`;
 
 const sanitizeDescription = (rawText) => {
   if (!rawText) return 'No description provided.';
@@ -53,6 +52,7 @@ export default function App() {
 
     try {
       const res = await fetch(`${API_URL}?${queryParams}`);
+      if (!res.ok) throw new Error(`HTTP Error: ${res.status}`);
       const responseData = await res.json();
       setJobs(responseData.data || []);
       setPagination(responseData.pagination || { currentPage: 1, totalPages: 1, totalRecords: 0 });
@@ -75,8 +75,8 @@ export default function App() {
       {/* Sticky Header with Backdrop Blur */}
       <header className="app-header">
         <div className="max-w-7xl mx-auto px-4 py-3.5 flex items-center justify-between">
-          <a href="/App.jsx" className="inline-flex items-center gap-3">
-            <img src="/public/CurrenX.png" alt="CurrenX" className="header-logo-img" />
+          <a href="/" className="inline-flex items-center gap-3">
+            <img src="/CurrenX.png" alt="CurrenX" className="header-logo-img" />
           </a>
         </div>
       </header>
@@ -94,11 +94,10 @@ export default function App() {
             Find Your Next <span className="hero-accent">Career Move</span>
           </h2>
           <p className="text-slate-300 text-base sm:text-lg mt-4 max-w-2xl mx-auto leading-relaxed">
-            Discover verified
-            <span className="hero-highlight">tech</span>,
-            <span className="hero-highlight">design</span>, and
-            <span className="hero-highlight">product</span>
-            roles from high-growth companies worldwide.
+            Discover verified{' '}
+            <span className="hero-highlight">tech</span>,{' '}
+            <span className="hero-highlight">design</span>, and{' '}
+            <span className="hero-highlight">product</span> roles from high-growth companies worldwide.
           </p>
         </div>
       </section>
@@ -109,8 +108,7 @@ export default function App() {
           <div className="max-w-5xl mx-auto px-4 w-full">
             <div className="job-search-card-1">
               <div className="hero-search-grid">
-
-                {/* Search Keywords Input with Inline SVG */}
+                {/* Search Keywords Input */}
                 <div className="input-icon-wrapper">
                   <svg
                     className="input-svg-icon"
@@ -130,7 +128,7 @@ export default function App() {
                   />
                 </div>
 
-                {/* Country / Location Input with Inline SVG */}
+                {/* Country / Location Input */}
                 <div className="input-icon-wrapper">
                   <svg
                     className="input-svg-icon"
@@ -159,12 +157,9 @@ export default function App() {
 
       {/* Main Feed Content */}
       <div className="max-w-7xl mx-auto px-4 py-10 w-full grid md:grid-cols-4 gap-8">
-
         {/* Sidebar Filters */}
         <aside className="md:col-span-1">
           <div className="filter-card space-y-6 sticky top-24">
-
-            {/* Filter Header with Modern SVG Icon */}
             <div className="flex items-center gap-2.5 pb-3.5 border-b border-slate-100 filter-header">
               <svg
                 className="filter-header-icon"
@@ -269,7 +264,6 @@ export default function App() {
                 </svg>
               </div>
             </div>
-
           </div>
         </aside>
 
