@@ -18,10 +18,6 @@ const ENV_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 const BASE_URL = ENV_URL.replace(/\/api\/jobs\/?$/, '').replace(/\/$/, '');
 const API_URL = `${BASE_URL}/api/jobs`;
 
-// fetch function:
-const response = await fetch(`${API_URL}?page=${page}&limit=${limit}&q=${q}...`);
-const data = await response.json();
-
 const sanitizeDescription = (rawText) => {
   if (!rawText) return 'No description provided.';
   try {
