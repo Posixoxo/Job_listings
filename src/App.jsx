@@ -11,9 +11,16 @@ import {
 } from 'lucide-react';
 import './index.css';
 
-// Dynamically construct the API URL using your VITE_API_URL environment variable
-const BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/$/, '');
-const API_URL = `${BASE_URL}/api/jobs`;
+// React component / API utility file:
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
+// Strip any trailing slashes or /api/jobs to normalize the base URL
+const cleanBase = BASE_URL.replace(/\/api\/jobs\/?$/, '').replace(/\/$/, '');
+const API_URL = `${cleanBase}/api/jobs`;
+
+// Example fetch call:
+const response = await fetch(`${API_URL}?page=${page}&limit=${limit}&q=${q}`);
+const data = await response.json();
 
 const sanitizeDescription = (rawText) => {
   if (!rawText) return 'No description provided.';
@@ -74,7 +81,7 @@ export default function App() {
     <div className="min-h-screen flex flex-col">
       {/* Sticky Header with Backdrop Blur */}
       <header className="app-header">
-        <div className="max-w-7xl mx-auto px-4 py-3.5 flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-4 py-3.5 flex items-center justify-between header-container">
           <a href="/" className="inline-flex items-center gap-3">
             <img src="/CurrenX.png" alt="CurrenX" className="header-logo-img" />
           </a>

@@ -86,13 +86,19 @@ body {
   cursor: default;
 }
 
+.header-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+}
+
 .header-logo-img {
   display: block;
   height: 70px;
   width: auto;
+  margin: 0;
   object-fit: contain;
-  justify-content: center;
-  align-items: center;
   cursor: pointer;
 }
 
