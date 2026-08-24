@@ -76,7 +76,7 @@ export default function App() {
       <header className="app-header">
         <div className="max-w-7xl mx-auto px-4 py-3.5 flex items-center justify-between">
           <a href="/App.jsx" className="inline-flex items-center gap-3">
-            <img src="/src/assets/CurrenX.png" alt="Logo" className="header-logo-img" />
+            <img src="/public/CurrenX.png" alt="CurrenX" className="header-logo-img" />
           </a>
         </div>
       </header>
