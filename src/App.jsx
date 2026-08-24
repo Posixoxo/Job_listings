@@ -159,7 +159,7 @@ export default function App() {
       </div>
 
       {/* Main Feed Content */}
-      <div className="max-w-7xl mx-auto px-4 py-10 w-full grid md:grid-cols-4 gap-8">
+      <div className="max-w-7xl mx-auto px-4 py-10 w-full grid md:grid-cols-4 gap-8 color-main">
         {/* Sidebar Filters */}
         <aside className="md:col-span-1">
           <div className="filter-card space-y-6 sticky top-24">
@@ -273,11 +273,11 @@ export default function App() {
         {/* Main Job Feed */}
         <main className="md:col-span-3 space-y-4">
           {loading ? (
-            <div className="text-center py-20 text-slate-400 bg-white rounded-xl border border-slate-200">
+            <div className="text-center py-20 text-slate-400 bg-white rounded-xl border border-slate-200 pagination-text">
               Fetching latest job feed...
             </div>
           ) : jobs.length === 0 ? (
-            <div className="bg-white p-12 text-center rounded-xl border border-slate-200 text-slate-500">
+            <div className="bg-white p-12 text-center rounded-xl border border-slate-200 text-slate-500 pagination-text">
               No matching job opportunities found. Try relaxing your search filters.
             </div>
           ) : (
@@ -286,11 +286,11 @@ export default function App() {
                 <div className="flex justify-between items-start gap-4">
                   <div className="logohead-container flex items-center gap-3">
                     {job.logo_url ? (
-                      <div className="company-logo-img-wrapper">
+                      <div className="company-logo-img-wrapper shrink-0" style={{ '--logo-src': `url(${job.logo_url})` }}>
                         <img
                           src={job.logo_url}
                           alt={`${job.company} logo`}
-                          className="company-logo-img w-12 h-12 object-contain rounded border border-slate-100 p-1 bg-white shrink-0"
+                          className="company-logo-img"
                           onError={(e) => {
                             e.target.onerror = null;
                             e.target.style.display = 'none';
@@ -312,7 +312,7 @@ export default function App() {
                     </div>
                   </div>
                   <span className={`tag-base ${job.is_active ? 'tag-remote' : 'tag-urgent'}`}>
-                    {job.is_active ? <CheckCircle className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
+                    {job.is_active ? <CheckCircle className="w-3 h-3 circle" /> : <XCircle className="w-3 h-3" />}
                     {job.is_active ? 'Active' : 'Closed'}
                   </span>
                 </div>
@@ -322,11 +322,11 @@ export default function App() {
                 </p>
 
                 <div className="flex items-center justify-between pt-4 mt-4 border-t border-slate-100 text-xs">
-                  <div className="flex items-center gap-3">
-                    <span className="flex items-center gap-1 text-slate-500 font-medium">
+                  <div className="flex items-center gap-3 description-meta">
+                    <span className="flex items-center gap-1 text-slate-500 font-medium map-icon">
                       <MapPin className="w-3.5 h-3.5 text-slate-400" />
-                      {job.location}
                     </span>
+                    <span className="country-tag">{job.location}</span>
                     <span className="text-slate-300">•</span>
                     <span className="tag-base tag-featured">{job.type}</span>
                   </div>
@@ -337,7 +337,7 @@ export default function App() {
                       rel="noreferrer"
                       className="btn-secondary flex items-center gap-1 text-xs"
                     >
-                      Apply Now <ExternalLink className="w-3 h-3" />
+                      Apply Now <span><ExternalLink className="w-3 h-3" /></span>
                     </a>
                   </div>
                 </div>
@@ -347,10 +347,10 @@ export default function App() {
 
           {/* Pagination Controls */}
           <div className="flex items-center justify-between bg-white p-4 rounded-xl border border-slate-200 mt-6">
-            <span className="text-sm text-slate-500 font-medium">
+            <span className="text-sm text-slate-500 font-medium pagination-text">
               Page {pagination.currentPage} of {pagination.totalPages || 1}
             </span>
-            <div className="flex gap-2">
+            <div className="flex gap-2 paginate-buttons">
               <button
                 disabled={pagination.currentPage === 1}
                 onClick={() => fetchJobs(pagination.currentPage - 1)}

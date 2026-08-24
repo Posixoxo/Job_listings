@@ -31,6 +31,11 @@ const stripHtmlTags = (str) => {
         .trim();
 };
 
+// Root endpoint to handle base URL health checks
+app.get('/', (req, res) => {
+    res.json({ message: 'Job Listings API is running. Use /api/jobs to fetch data.' });
+});
+
 app.get('/api/jobs', async (req, res) => {
     try {
         const {
