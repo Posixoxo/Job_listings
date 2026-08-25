@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   MapPin,
   Briefcase,
@@ -7,14 +7,13 @@ import {
   ChevronRight,
   CheckCircle,
   XCircle,
-  Building2
+  Building2,
+  Loader2
 } from 'lucide-react';
 import './index.css';
 
-// Get the base backend URL from Vercel env or default to localhost
+// Get base backend URL
 const ENV_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
-
-// Clean out any trailing slashes or existing /api/jobs paths before constructing the endpoint
 const BASE_URL = ENV_URL.replace(/\/api\/jobs\/?$/, '').replace(/\/$/, '');
 const API_URL = `${BASE_URL}/api/jobs`;
 
@@ -33,6 +32,9 @@ export default function App() {
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [pagination, setPagination] = useState({ currentPage: 1, totalPages: 1, totalRecords: 0 });
+
+  // Target anchor ref placed at top of main content section
+  const feedTopRef = useRef(null);
 
   // Filter States
   const [search, setSearch] = useState('');
@@ -61,6 +63,7 @@ export default function App() {
       setPagination(responseData.pagination || { currentPage: 1, totalPages: 1, totalRecords: 0 });
     } catch (err) {
       console.error('Error fetching jobs:', err);
+      setJobs([]);
     } finally {
       setLoading(false);
     }
@@ -72,6 +75,23 @@ export default function App() {
     }, 300);
     return () => clearTimeout(timer);
   }, [fetchJobs]);
+
+  // Scroll to top of the main feed area whenever page changes or new data finishes loading
+  useEffect(() => {
+    if (!loading && feedTopRef.current) {
+      feedTopRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [pagination.currentPage, loading]);
+
+  const handlePageChange = (targetPage) => {
+    if (targetPage < 1 || targetPage > pagination.totalPages || targetPage === pagination.currentPage) return;
+
+    // Smooth scroll immediately on click to prevent layout jarring
+    if (feedTopRef.current) {
+      feedTopRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    fetchJobs(targetPage);
+  };
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -87,7 +107,7 @@ export default function App() {
       {/* Hero Section */}
       <section className="hero-section text-center">
         <div className="flex items-center gap-3 active-openings-container">
-          <span className="tag-base tag-remote hidden sm:inline-flex">
+          <span className="hidden sm:inline-flex">
             {pagination.totalRecords} Active Openings
           </span>
         </div>
@@ -265,6 +285,10 @@ export default function App() {
                 >
                   <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
                 </svg>
+
+                {/* Scroll Target Element offset below the sticky header */}
+                <div ref={feedTopRef} className="scroll-mt-24" />
+
               </div>
             </div>
           </div>
@@ -272,12 +296,14 @@ export default function App() {
 
         {/* Main Job Feed */}
         <main className="md:col-span-3 space-y-4">
+
           {loading ? (
-            <div className="text-center py-20 text-slate-400 bg-white rounded-xl border border-slate-200 pagination-text">
-              Fetching latest job feed...
+            <div className="job-card flex flex-col items-center justify-center p-16 text-center space-y-4 min-h-[350px]">
+              <Loader2 className="w-10 h-10 text-blue-500 animate-spin" />
+              <p className="text-slate-300 font-medium text-sm">Fetching job feed...</p>
             </div>
           ) : jobs.length === 0 ? (
-            <div className="bg-white p-12 text-center rounded-xl border border-slate-200 text-slate-500 pagination-text">
+            <div className="job-card p-12 text-center text-slate-300">
               No matching job opportunities found. Try relaxing your search filters.
             </div>
           ) : (
@@ -352,15 +378,15 @@ export default function App() {
             </span>
             <div className="flex gap-2 paginate-buttons">
               <button
-                disabled={pagination.currentPage === 1}
-                onClick={() => fetchJobs(pagination.currentPage - 1)}
+                disabled={pagination.currentPage === 1 || loading}
+                onClick={() => handlePageChange(pagination.currentPage - 1)}
                 className="pagination-item disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <ChevronLeft className="w-4 h-4 inline" />
               </button>
               <button
-                disabled={pagination.currentPage >= pagination.totalPages}
-                onClick={() => fetchJobs(pagination.currentPage + 1)}
+                disabled={pagination.currentPage >= pagination.totalPages || loading}
+                onClick={() => handlePageChange(pagination.currentPage + 1)}
                 className="pagination-item disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <ChevronRight className="w-4 h-4 inline" />

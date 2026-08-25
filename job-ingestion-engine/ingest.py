@@ -8,15 +8,55 @@ import psycopg2
 from psycopg2.extras import execute_values
 from datetime import datetime, timezone
 from dotenv import load_dotenv
+from pathlib import Path
 
-# Load environment variables
-load_dotenv()
+# Explicitly load .env from the root directory
+env_path = Path(__file__).resolve().parent.parent / '.env'
+load_dotenv(dotenv_path=env_path)
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 def get_db_connection():
     """Establish SSL connection to Render Postgres."""
+    if not DATABASE_URL:
+        raise ValueError("DATABASE_URL is not set! Check your root .env file.")
     return psycopg2.connect(DATABASE_URL)
+
+def verify_connection_and_schema(conn):
+    """
+    Diagnostics runner: Prints active server IP and database name,
+    and asserts that required tables exist before running the scrapers.
+    """
+    cursor = conn.cursor()
+    cursor.execute("SELECT inet_server_addr(), current_database(), current_schema();")
+    server_ip, db_name, schema_name = cursor.fetchone()
+    
+    print("==================================================")
+    print(f"CONNECTED POSTGRES HOST IP : {server_ip}")
+    print(f"CONNECTED DATABASE         : {db_name}")
+    print(f"ACTIVE SCHEMA              : {schema_name}")
+    print("==================================================")
+
+    # Check for table existence in public schema
+    cursor.execute("""
+        SELECT table_name 
+        FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name IN ('job_listings', 'target_companies');
+    """)
+    found_tables = {row[0] for row in cursor.fetchall()}
+    
+    missing_tables = {'job_listings', 'target_companies'} - found_tables
+    if missing_tables:
+        cursor.close()
+        raise RuntimeError(
+            f"CONNECTION MISMATCH! Connected to database '{db_name}' at IP {server_ip}, "
+            f"but missing required tables: {missing_tables}. "
+            f"Please verify your DATABASE_URL in .env."
+        )
+    
+    print("✓ Schema Verification Passed: Required tables located.")
+    cursor.close()
 
 def generate_dedup_hash(title: str, company: str) -> str:
     """Creates a deterministic unique SHA-256 hash for deduplication."""
@@ -77,8 +117,7 @@ def fetch_remoteok_jobs():
 
             raw_desc = item.get('description', '')
             clean_desc = clean_html_description(raw_desc)
-            
-            # Extract raw logo or resolve dynamic fallback
+
             raw_logo = item.get('company_logo', '') or item.get('logo', '')
             logo_url = get_company_logo_fallback(company, direct_logo=raw_logo)
 
@@ -120,7 +159,6 @@ def fetch_weworkremotely_jobs():
             pub_date = item.findtext('pubDate', datetime.now(timezone.utc).isoformat())
             raw_desc = item.findtext('description', '')
 
-            # WWR Titles are formatted as "Company Name: Job Title"
             if ":" in raw_title:
                 company, title = raw_title.split(":", 1)
             else:
@@ -133,7 +171,6 @@ def fetch_weworkremotely_jobs():
 
             clean_desc = clean_html_description(raw_desc)
 
-            # Extract image inside RSS description tag if present
             raw_logo = ''
             if raw_desc:
                 soup = BeautifulSoup(raw_desc, 'html.parser')
@@ -177,8 +214,7 @@ def fetch_greenhouse_jobs(company_name: str, slug: str):
 
         jobs = []
         data = res.json()
-        
-        # Greenhouse provides company logo under board metadata
+
         raw_logo = data.get('logo_url', '')
         logo_url = get_company_logo_fallback(company_name, direct_logo=raw_logo, slug=slug)
 
@@ -315,7 +351,7 @@ def auto_discover_company_ats(company_name: str, domain: str, cursor, conn):
 
         if detected_ats:
             cursor.execute("""
-                INSERT INTO target_companies (name, ats_type, ats_slug, is_active)
+                INSERT INTO public.target_companies (name, ats_type, ats_slug, is_active)
                 VALUES (%s, %s, %s, TRUE)
                 ON CONFLICT (ats_slug) DO UPDATE SET is_active = TRUE;
             """, (company_name, detected_ats, slug))
@@ -343,12 +379,15 @@ def run_pipeline():
     conn = None
     try:
         conn = get_db_connection()
-        cursor = conn.cursor()
+        
+        # Immediate assertion step before running scrapers
+        verify_connection_and_schema(conn)
 
+        cursor = conn.cursor()
         cursor.execute("SET search_path TO public;")
 
         # 1. Fetch active target companies from Postgres
-        cursor.execute("SELECT name, ats_type, ats_slug FROM target_companies WHERE is_active = TRUE;")
+        cursor.execute("SELECT name, ats_type, ats_slug FROM public.target_companies WHERE is_active = TRUE;")
         targets = cursor.fetchall()
 
         all_jobs = []
@@ -376,9 +415,9 @@ def run_pipeline():
         clean_jobs = deduplicate_jobs(all_jobs)
         print(f"Total unique listings to upsert: {len(clean_jobs)}")
 
-        # 5. Perform Atomic Batch Upsert into Postgres (Overwriting old logo_url entries)
+        # 5. Perform Atomic Batch Upsert into Postgres
         upsert_query = """
-            INSERT INTO job_listings (
+            INSERT INTO public.job_listings (
                 dedup_hash, title, company_name, location, category, 
                 employment_type, description, apply_url, logo_url, source_type, 
                 source_provider, posted_at
@@ -389,6 +428,7 @@ def run_pipeline():
                 description = EXCLUDED.description,
                 apply_url = EXCLUDED.apply_url,
                 logo_url = EXCLUDED.logo_url,
+                posted_at = EXCLUDED.posted_at,
                 updated_at = NOW();
         """
 
