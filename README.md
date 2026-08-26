@@ -1,163 +1,191 @@
 # CurrenX — Free & Open Job Discovery Engine
 
-> **Why CurrenX?**  
-> Searching for a job is stressful enough without running into paywalls, locked features, or platforms demanding subscription fees just to apply or see full job details. **If someone is looking for work, why ask them to pay money?**  
-> 
-> **CurrenX** was built with a clear mission: **Zero paywalls, zero subscription traps.** It is a completely free, automated job discovery platform engineered to scrape, aggregate, and present active job listings with direct application links—giving job seekers unfiltered access to opportunities without charging a single dime.
+Searching for a job is stressful enough without paywalls, locked features, or platforms demanding a subscription just to apply or see full job details. If someone is looking for work, why ask them to pay money?
+
+**CurrenX** is a completely free, automated job discovery platform that scrapes, aggregates, and presents active job listings with direct application links — giving job seekers unfiltered access to opportunities without charging a single dime.
+
+**Mission: zero paywalls, zero subscription traps.**
 
 ---
 
-## 🏗️ System Architecture Overview
+## Table of Contents
 
-CurrenX is built as a full-stack, decoupled Web Application paired with an automated ETL (Extract, Transform, Load) data pipeline.
-
-              +-------------------------------+
-              |  GitHub Actions Workflow      |
-              |  (Scheduled daily at 15:00UTC)|
-              +---------------+---------------+
-                              |
-                              v
-                    [ Python Ingestion ]
-                    (BeautifulSoup / Requests)
-                              |
-                              v
-+------------------+    +-------------------+    +--------------------+
-| React Frontend   |--->| Express.js API    |--->| PostgreSQL DB      |
-| (Vite + Tailwind)|    | (Node.js REST)    |    | (Knex Migrations)  |
-+------------------+    +-------------------+    +--------------------+
+- [Architecture Overview](#architecture-overview)
+- [Technology Stack](#technology-stack)
+- [Key Features](#key-features)
+- [Repository Structure](#repository-structure)
+- [Database Schema](#database-schema)
+- [API Documentation](#api-documentation)
+- [Getting Started](#getting-started)
+- [Automated Data Pipeline](#automated-data-pipeline)
+- [License](#license)
 
 ---
 
-## 🛠️ Technology Stack
+## Architecture Overview
 
-* **Frontend:** React 19, Vite, Tailwind CSS 4, Lucide React Icons
-* **Backend:** Express.js 5, Node.js (`type: "module"`), CORS, Dotenv
-* **Database & ORM:** PostgreSQL, `pg` Pool, Knex.js (Schema Migrations)
-* **Ingestion Pipeline:** Python 3.11, BeautifulSoup4, Requests, Psycopg2
-* **CI/CD & Automation:** GitHub Actions (Automated Cron Job Ingestion)
-* **Hosting Targets:** Vercel (Frontend), Render / Railway (Backend API), PostgreSQL Remote Server
+CurrenX is a full-stack, decoupled web application paired with an automated ETL (Extract, Transform, Load) data pipeline.
+
+```
+                 ┌────────────────────────────────┐
+                 │   GitHub Actions Workflow       │
+                 │   (scheduled daily, 15:00 UTC)  │
+                 └────────────────┬─────────────────┘
+                                  │
+                                  ▼
+                       ┌─────────────────────┐
+                       │  Python Ingestion    │
+                       │ (BeautifulSoup /     │
+                       │  Requests)           │
+                       └──────────┬───────────┘
+                                  │
+                                  ▼
+┌───────────────────┐    ┌────────────────────┐    ┌──────────────────────┐
+│  React Frontend    │───▶│  Express.js API     │───▶│  PostgreSQL Database │
+│  (Vite + Tailwind)  │    │  (Node.js REST)     │    │  (Knex migrations)   │
+└───────────────────┘    └────────────────────┘    └──────────────────────┘
+```
 
 ---
 
-## 🚀 Key Features
+## Technology Stack
 
-1. **Unfiltered Job Search:** Search by keywords, company name, location, job type (Full-time, Part-time, Contract), and work model (Remote, Hybrid, Onsite).
-2. **Automated Ingestion:** Python scraper runs daily via GitHub Actions at 4:00 PM WAT (8:00 AM EDT) to pull fresh listings into the database.
-3. **Optimized Pagination:** Server-side SQL pagination (`LIMIT` / `OFFSET`) ensuring high performance under large datasets.
-4. **HTML Sanitization:** Backend sanitization cleans raw HTML descriptions into readable text prior to client delivery.
-5. **Subscriber Management:** Email subscription system backed by unique index constraints in PostgreSQL (`23505` duplicate prevention) and persistent client storage.
+| Layer | Technologies |
+|---|---|
+| **Frontend** | React 19, Vite, Tailwind CSS 4, Lucide React Icons |
+| **Backend** | Express.js 5, Node.js (`type: "module"`), CORS, Dotenv |
+| **Database & ORM** | PostgreSQL, `pg` Pool, Knex.js (schema migrations) |
+| **Ingestion Pipeline** | Python 3.11, BeautifulSoup4, Requests, Psycopg2 |
+| **CI/CD & Automation** | GitHub Actions (scheduled cron ingestion) |
+| **Hosting** | Vercel (frontend), Render / Railway (backend API), remote PostgreSQL |
 
 ---
 
-## 📁 Repository Structure
+## Key Features
 
+- **Unfiltered job search** — filter by keyword, company, location, job type (full-time, part-time, contract), and work model (remote, hybrid, onsite).
+- **Automated ingestion** — a Python scraper runs daily via GitHub Actions at 4:00 PM WAT (8:00 AM EDT / 15:00 UTC) to pull fresh listings into the database.
+- **Optimized pagination** — server-side SQL pagination (`LIMIT` / `OFFSET`) for consistent performance on large datasets.
+- **HTML sanitization** — raw HTML job descriptions are sanitized into clean, readable text before being sent to the client.
+- **Subscriber management** — email subscription system backed by a unique index constraint in PostgreSQL (duplicate prevention via error code `23505`).
+
+---
+
+## Repository Structure
+
+```
 job-listings-app/
 ├── .github/
 │   └── workflows/
-│       └── ingest.yml              # Scheduled GitHub Actions cron pipeline
+│       └── ingest.yml               # Scheduled GitHub Actions cron pipeline
 ├── migrations/
-│   └── 20260826181039_create_initial_tables.js # Knex DB migration file
+│   └── 20260826181039_create_initial_tables.js   # Knex DB migration
 ├── job-ingestion-engine/
-│   └── ingest.py                   # Python web scraper & database ingester
+│   └── ingest.py                    # Python web scraper & database ingester
 ├── src/
 │   ├── components/
-│   │   └── SubscribeModal.jsx      # Modal component with local storage tracking
-│   ├── App.jsx                     # Core job listing view & search interface
-│   └── main.jsx                    # React entry point
-├── .env.example                    # Environment variable templates
-├── knexfile.js                     # Knex migration & environment config
-├── package.json                    # Project dependencies & operational scripts
-├── server.js                       # Express.js backend REST API
-├── vite.config.js                  # Frontend build configuration & dev proxy
-└── README.md                       # Main project documentation
-
+│   │   └── SubscribeModal.jsx       # Subscribe modal with local storage tracking
+│   ├── App.jsx                      # Core job listing view & search interface
+│   └── main.jsx                     # React entry point
+├── .env.example                     # Environment variable template
+├── knexfile.js                      # Knex migration & environment config
+├── package.json                     # Project dependencies & scripts
+├── server.js                        # Express.js backend REST API
+├── vite.config.js                   # Frontend build config & dev proxy
+└── README.md                        # Main project documentation
+```
 
 ---
 
-## 🗄️ Database Schema & Migrations
+## Database Schema
 
-Managed via **Knex.js** for zero-downtime deployment host switching (e.g., moving between Render and Railway).
+Schema is managed via **Knex.js** for zero-downtime host switching (e.g. moving between Render and Railway).
 
-### `job_listings` Table
+### `job_listings`
+
 | Column | Type | Attributes |
 |---|---|---|
-| `id` | SERIAL | PRIMARY KEY |
-| `title` | VARCHAR | NOT NULL |
-| `company_name` | VARCHAR | NOT NULL |
-| `location` | VARCHAR | NOT NULL |
-| `employment_type` | VARCHAR | Optional |
-| `description` | TEXT | Sanitized string |
-| `apply_url` | TEXT | Direct link |
-| `logo_url` | TEXT | COALESCE default |
-| `posted_at` | TIMESTAMP | DEFAULT NOW() |
-| `is_active` | BOOLEAN | DEFAULT true |
+| `id` | `SERIAL` | Primary key |
+| `title` | `VARCHAR` | Not null |
+| `company_name` | `VARCHAR` | Not null |
+| `location` | `VARCHAR` | Not null |
+| `employment_type` | `VARCHAR` | Optional |
+| `description` | `TEXT` | Sanitized string |
+| `apply_url` | `TEXT` | Direct application link |
+| `logo_url` | `TEXT` | `COALESCE` default |
+| `posted_at` | `TIMESTAMP` | Default `NOW()` |
+| `is_active` | `BOOLEAN` | Default `true` |
 
-### `subscribers` Table
+### `subscribers`
+
 | Column | Type | Attributes |
 |---|---|---|
-| `id` | SERIAL | PRIMARY KEY |
-| `email` | VARCHAR(255) | UNIQUE, NOT NULL |
-| `created_at` | TIMESTAMP | DEFAULT NOW() |
+| `id` | `SERIAL` | Primary key |
+| `email` | `VARCHAR(255)` | Unique, not null |
+| `created_at` | `TIMESTAMP` | Default `NOW()` |
 
 ---
 
-## 🔌 API Documentation
+## API Documentation
 
-### Base URL
-- **Local:** `http://localhost:5000`
-- **Production:** `https://your-api-domain.onrender.com`
+**Base URL**
+- Local: `http://localhost:5000`
+- Production: `https://your-api-domain.onrender.com`
 
-### Endpoints
+### `GET /api/jobs`
+Fetches a paginated list of active jobs matching optional filter parameters (keyword, company, location, job type, work model).
 
-#### `GET /api/jobs`
-Fetches a paginated list of active jobs matching optional filter parameters.
-
-#### `POST /api/subscribe`
-Stores an email address into the `subscribers` database table.
+### `POST /api/subscribe`
+Stores an email address in the `subscribers` table.
 
 ---
 
-## ⚙️ Environment Setup & Installation
+## Getting Started
 
-### 1. Clone & Install Dependencies
+### 1. Clone and install dependencies
+
 ```bash
-git clone [https://github.com/your-username/job-listings-app.git](https://github.com/your-username/job-listings-app.git)
+git clone https://github.com/your-username/job-listings-app.git
 cd job-listings-app
 npm install
-2. Configure Environment Variables
-Create a .env file in the root directory:
+```
 
-Code snippet
+### 2. Configure environment variables
+
+Create a `.env` file in the project root:
+
+```env
 DATABASE_URL=postgres://user:password@localhost:5432/currenx_db
 PORT=5000
 VITE_API_URL=http://localhost:5000
-3. Run Database Migrations
-Bash
+```
+
+### 3. Run database migrations
+
+```bash
 npm run migrate
-4. Start Local Servers
-Bash
+```
+
+### 4. Start the local servers
+
+```bash
 npm run start   # Backend API (Terminal 1)
-npm run dev     # Frontend Client (Terminal 2)
-🔄 Automated Data Pipeline (GitHub Actions)
-The repository includes an automated pipeline in .github/workflows/ingest.yml running daily at 15:00 UTC (4:00 PM WAT / 8:00 AM EDT).
-
-To enable this on GitHub:
-
-Go to Repository Settings > Secrets and variables > Actions.
-
-Add a new repository secret named DATABASE_URL containing your remote production database connection string.
-
-📜 License & Usage
-This project is open source and built to empower job seekers everywhere. Feel free to fork, customize, or deploy your own instance to keep job hunting free and accessible.
-
+npm run dev      # Frontend client (Terminal 2)
+```
 
 ---
 
-### How to push after creating `README.md`:
+## Automated Data Pipeline
 
-Run these 3 commands in your terminal:
+The repository includes an automated ingestion pipeline defined in `.github/workflows/ingest.yml`, which runs daily at **15:00 UTC** (4:00 PM WAT / 8:00 AM EDT).
 
-```bash
-git add README.md package.json
-git commit -m "docs: add comprehensive README documentation"
-git push origin main
+To enable it on GitHub:
+
+1. Go to **Repository Settings → Secrets and variables → Actions**.
+2. Add a new repository secret named `DATABASE_URL` containing your remote production database connection string.
+
+---
+
+## License
+
+This project is open source and built to empower job seekers everywhere. Fork it, customize it, or deploy your own instance to keep job hunting free and accessible...
