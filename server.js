@@ -31,6 +31,36 @@ const stripHtmlTags = (str) => {
         .trim();
 };
 
+// POST /api/subscribe - Save email subscriber
+app.post('/api/subscribe', async (req, res) => {
+    const { email } = req.body;
+
+    // Simple RFC 5322 compliant regex for email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!email || !emailRegex.test(email)) {
+        return res.status(400).json({ error: 'Please provide a valid email address.' });
+    }
+
+    try {
+        const newSubscriber = await pool.query(
+            'INSERT INTO subscribers (email) VALUES ($1) RETURNING *',
+            [email.toLowerCase().trim()]
+        );
+
+        return res.status(201).json({
+            message: 'Subscribed successfully!',
+            subscriber: newSubscriber.rows[0],
+        });
+    } catch (err) {
+        // Unique violation error code in PostgreSQL is 23505
+        if (err.code === '23505') {
+            return res.status(409).json({ error: 'This email is already subscribed.' });
+        }
+        console.error('Subscription DB Error:', err);
+        return res.status(500).json({ error: 'Server error. Please try again later.' });
+    }
+});
+
 // Root endpoint to handle base URL health checks
 app.get('/', (req, res) => {
     res.json({ message: 'Job Listings API is running. Use /api/jobs to fetch data.' });

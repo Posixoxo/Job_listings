@@ -2,7 +2,8 @@ name: Automated Job Ingestion Pipeline
 
 on:
   schedule:
-    - cron: '0 0 * * *'  # Runs daily at midnight
+    # 15:00 UTC = 4:00 PM WAT (Nigeria) / 8:00 AM EDT (US East)
+    - cron: '0 15 * * *'
   workflow_dispatch:      # Allows manual trigger via GitHub UI
 
 jobs:

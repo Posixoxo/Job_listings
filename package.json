@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "start": "node server.js",
+    "migrate": "knex migrate:latest",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"
@@ -13,6 +15,7 @@
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "knex": "^3.3.0",
     "lucide-react": "^1.33.0",
     "pg": "^8.23.0",
     "react": "^19.2.8",

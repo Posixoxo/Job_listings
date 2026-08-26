@@ -10,7 +10,8 @@ import {
   Building2,
   Loader2
 } from 'lucide-react';
-import './index.css';
+import SubscribeModal from './components/SubscribeModal';
+
 
 // Get base backend URL
 const ENV_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
@@ -285,14 +286,15 @@ export default function App() {
                 >
                   <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
                 </svg>
-
-                {/* Scroll Target Element offset below the sticky header */}
-                <div ref={feedTopRef} className="scroll-mt-24" />
-
               </div>
             </div>
           </div>
         </aside>
+
+        <div className="down-margin">
+          {/* Scroll Target Element offset below the sticky header */}
+          <div ref={feedTopRef} className="scroll-mt-24" />
+        </div>
 
         {/* Main Job Feed */}
         <main className="md:col-span-3 space-y-4">
@@ -395,6 +397,9 @@ export default function App() {
           </div>
         </main>
       </div>
+
+      {/* Self-contained timed modal */}
+      <SubscribeModal />
     </div>
   );
 }
