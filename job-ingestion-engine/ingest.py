@@ -404,12 +404,37 @@ def run_pipeline():
 
         # 3. Layer 1: Extract Global Feeds (RemoteOK + WeWorkRemotely)
         print("Fetching jobs from RemoteOK feed...")
-        all_jobs.extend(fetch_remoteok_jobs())
+        remoteok_jobs = fetch_remoteok_jobs()
+        all_jobs.extend(remoteok_jobs)
 
         print("Fetching jobs from We Work Remotely RSS feed...")
-        all_jobs.extend(fetch_weworkremotely_jobs())
+        wwr_jobs = fetch_weworkremotely_jobs()
+        all_jobs.extend(wwr_jobs)
 
         print(f"Total extracted raw listings: {len(all_jobs)}")
+
+        # 3b. Auto-discover ATS for new companies found in the public feeds
+        print("Running automated ATS discovery on new companies...")
+        known_slugs = {t[2] for t in targets}  # already known ats_slugs
+
+        # Collect unique company names from the public feeds
+        new_companies = set()
+        for job in remoteok_jobs + wwr_jobs:
+            # job structure is a tuple: (dedup_hash, title, company_name, ...)
+            company_name = job[2] if len(job) > 2 else None
+            if company_name and company_name.strip():
+                new_companies.add(company_name.strip())
+
+        for company_name in new_companies:
+            slug_guess = company_name.lower().replace(" ", "").replace(".", "")
+            if slug_guess in known_slugs:
+                continue  # already registered
+
+            # Try a simple domain guess (company.com)
+            domain_guess = f"{slug_guess}.com"
+            detected, slug = auto_discover_company_ats(company_name, domain_guess, cursor, conn)
+            if detected:
+                known_slugs.add(slug)
 
         # 4. Filter batch-level duplicate hashes
         clean_jobs = deduplicate_jobs(all_jobs)
