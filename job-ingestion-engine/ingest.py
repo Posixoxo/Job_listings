@@ -1,6 +1,7 @@
 import os
 import re
 import hashlib
+import time
 import requests
 import xml.etree.ElementTree as ET
 from bs4 import BeautifulSoup
@@ -11,42 +12,58 @@ from dotenv import load_dotenv
 from pathlib import Path
 
 # Explicitly load .env from the root directory
-env_path = Path(__file__).resolve().parent.parent / '.env'
+env_path = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(dotenv_path=env_path)
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-def get_db_connection():
-    """Establish SSL connection to Render Postgres."""
+# Set to True only when you want to try discovering new ATS companies.
+# Keep False for reliable daily runs (discovery currently uses weak domain guesses).
+ENABLE_ATS_DISCOVERY = False
+DISCOVERY_LIMIT = 15  # max new companies to try per run when enabled
+UPSERT_CHUNK_SIZE = 100
+
+
+def get_db_connection(max_retries=3):
+    """Establish SSL connection to Neon with simple retry."""
     if not DATABASE_URL:
         raise ValueError("DATABASE_URL is not set! Check your root .env file.")
-    return psycopg2.connect(DATABASE_URL)
+
+    last_error = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            conn = psycopg2.connect(DATABASE_URL, connect_timeout=20)
+            return conn
+        except Exception as e:
+            last_error = e
+            print(f"Connection attempt {attempt}/{max_retries} failed: {e}")
+            if attempt < max_retries:
+                time.sleep(2)
+
+    raise last_error
+
 
 def verify_connection_and_schema(conn):
-    """
-    Diagnostics runner: Prints active server IP and database name,
-    and asserts that required tables exist before running the scrapers.
-    """
+    """Print diagnostics and assert required tables exist."""
     cursor = conn.cursor()
     cursor.execute("SELECT inet_server_addr(), current_database(), current_schema();")
     server_ip, db_name, schema_name = cursor.fetchone()
-    
+
     print("==================================================")
     print(f"CONNECTED POSTGRES HOST IP : {server_ip}")
     print(f"CONNECTED DATABASE         : {db_name}")
     print(f"ACTIVE SCHEMA              : {schema_name}")
     print("==================================================")
 
-    # Check for table existence in public schema
     cursor.execute("""
-        SELECT table_name 
-        FROM information_schema.tables 
-        WHERE table_schema = 'public' 
-        AND table_name IN ('job_listings', 'target_companies');
+        SELECT table_name
+        FROM information_schema.tables
+        WHERE table_schema = 'public'
+          AND table_name IN ('job_listings', 'target_companies');
     """)
     found_tables = {row[0] for row in cursor.fetchall()}
-    
-    missing_tables = {'job_listings', 'target_companies'} - found_tables
+
+    missing_tables = {"job_listings", "target_companies"} - found_tables
     if missing_tables:
         cursor.close()
         raise RuntimeError(
@@ -54,14 +71,16 @@ def verify_connection_and_schema(conn):
             f"but missing required tables: {missing_tables}. "
             f"Please verify your DATABASE_URL in .env."
         )
-    
+
     print("✓ Schema Verification Passed: Required tables located.")
     cursor.close()
+
 
 def generate_dedup_hash(title: str, company: str) -> str:
     """Creates a deterministic unique SHA-256 hash for deduplication."""
     raw = f"{title.strip().lower()}:{company.strip().lower()}"
-    return hashlib.sha256(raw.encode('utf-8')).hexdigest()
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
 
 def clean_html_description(raw_html: str) -> str:
     """Strips HTML tags, scripts, styles, and normalizes whitespace."""
@@ -72,35 +91,31 @@ def clean_html_description(raw_html: str) -> str:
         for element in soup(["script", "style", "header", "footer", "nav"]):
             element.decompose()
         text = soup.get_text(separator=" ", strip=True)
-        return re.sub(r'\s+', ' ', text).strip()
+        return re.sub(r"\s+", " ", text).strip()
     except Exception:
-        return re.sub(r'<[^>]*>?', ' ', str(raw_html)).strip()
+        return re.sub(r"<[^>]*>?", " ", str(raw_html)).strip()
+
 
 def get_company_logo_fallback(company_name: str, direct_logo: str = "", slug: str = "") -> str:
-    """
-    Robust logo resolver that checks direct URLs first and then falls back 
-    to Google Favicon API and Unavatar services instead of deprecated Clearbit.
-    """
-    if direct_logo and str(direct_logo).startswith(('http://', 'https://')):
+    """Resolve logo URL with Google Favicon fallback."""
+    if direct_logo and str(direct_logo).startswith(("http://", "https://")):
         return direct_logo.strip()
 
-    # Clean company identifier for domain fallback
     clean_identifier = (slug or company_name).lower().strip()
-    clean_identifier = re.sub(r'[^a-z0-9]', '', clean_identifier)
-
+    clean_identifier = re.sub(r"[^a-z0-9]", "", clean_identifier)
     if not clean_identifier:
         return ""
 
-    # Primary Fallback: Google Favicon Service (128px high-res)
     domain_guess = f"{clean_identifier}.com"
     return f"https://www.google.com/s2/favicons?domain={domain_guess}&sz=128"
+
 
 # --- LAYER 1: OPEN GLOBAL FEEDS ---
 
 def fetch_remoteok_jobs():
     """Fetches global remote roles from RemoteOK JSON API."""
     url = "https://remoteok.com/api"
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     try:
         res = requests.get(url, headers=headers, timeout=12)
         if res.status_code != 200:
@@ -110,40 +125,40 @@ def fetch_remoteok_jobs():
         jobs = []
         data = res.json()[1:]  # Skip metadata header
         for item in data[:100]:
-            company = item.get('company', 'Unknown')
-            title = item.get('position', '')
+            company = item.get("company", "Unknown")
+            title = item.get("position", "")
             if not title:
                 continue
 
-            raw_desc = item.get('description', '')
+            raw_desc = item.get("description", "")
             clean_desc = clean_html_description(raw_desc)
-
-            raw_logo = item.get('company_logo', '') or item.get('logo', '')
+            raw_logo = item.get("company_logo", "") or item.get("logo", "")
             logo_url = get_company_logo_fallback(company, direct_logo=raw_logo)
 
             jobs.append((
                 generate_dedup_hash(title, company),
                 title,
                 company,
-                'Remote',
-                'General',
-                'Full-Time',
+                "Remote",
+                "General",
+                "Full-Time",
                 clean_desc,
-                item.get('url', ''),
+                item.get("url", ""),
                 logo_url,
-                'feed',
-                'remoteok',
-                item.get('date', datetime.now(timezone.utc).isoformat())
+                "feed",
+                "remoteok",
+                item.get("date", datetime.now(timezone.utc).isoformat()),
             ))
         return jobs
     except Exception as e:
         print(f"[RemoteOK] Error fetching feed: {e}")
         return []
 
+
 def fetch_weworkremotely_jobs():
     """Fetches global listings from WeWorkRemotely RSS Feed."""
     url = "https://weworkremotely.com/remote-jobs.rss"
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     try:
         res = requests.get(url, headers=headers, timeout=12)
         if res.status_code != 200:
@@ -153,11 +168,11 @@ def fetch_weworkremotely_jobs():
         root = ET.fromstring(res.content)
         jobs = []
 
-        for item in root.findall('./channel/item'):
-            raw_title = item.findtext('title', '')
-            link = item.findtext('link', '')
-            pub_date = item.findtext('pubDate', datetime.now(timezone.utc).isoformat())
-            raw_desc = item.findtext('description', '')
+        for item in root.findall("./channel/item"):
+            raw_title = item.findtext("title", "")
+            link = item.findtext("link", "")
+            pub_date = item.findtext("pubDate", datetime.now(timezone.utc).isoformat())
+            raw_desc = item.findtext("description", "")
 
             if ":" in raw_title:
                 company, title = raw_title.split(":", 1)
@@ -171,12 +186,12 @@ def fetch_weworkremotely_jobs():
 
             clean_desc = clean_html_description(raw_desc)
 
-            raw_logo = ''
+            raw_logo = ""
             if raw_desc:
-                soup = BeautifulSoup(raw_desc, 'html.parser')
-                img_tag = soup.find('img')
-                if img_tag and img_tag.get('src'):
-                    raw_logo = img_tag['src']
+                soup = BeautifulSoup(raw_desc, "html.parser")
+                img_tag = soup.find("img")
+                if img_tag and img_tag.get("src"):
+                    raw_logo = img_tag["src"]
 
             logo_url = get_company_logo_fallback(company, direct_logo=raw_logo)
 
@@ -184,20 +199,21 @@ def fetch_weworkremotely_jobs():
                 generate_dedup_hash(title, company),
                 title,
                 company,
-                'Remote',
-                'General',
-                'Full-Time',
+                "Remote",
+                "General",
+                "Full-Time",
                 clean_desc,
                 link,
                 logo_url,
-                'feed',
-                'weworkremotely',
-                pub_date
+                "feed",
+                "weworkremotely",
+                pub_date,
             ))
         return jobs
     except Exception as e:
         print(f"[WWR] Error fetching RSS feed: {e}")
         return []
+
 
 # --- LAYER 2: DYNAMIC ATS ENGINE ---
 
@@ -214,35 +230,35 @@ def fetch_greenhouse_jobs(company_name: str, slug: str):
 
         jobs = []
         data = res.json()
-
-        raw_logo = data.get('logo_url', '')
+        raw_logo = data.get("logo_url", "")
         logo_url = get_company_logo_fallback(company_name, direct_logo=raw_logo, slug=slug)
 
-        for item in data.get('jobs', []):
-            title = item.get('title', '')
+        for item in data.get("jobs", []):
+            title = item.get("title", "")
             if not title:
                 continue
 
-            clean_desc = clean_html_description(item.get('content', ''))
+            clean_desc = clean_html_description(item.get("content", ""))
 
             jobs.append((
                 generate_dedup_hash(title, company_name),
                 title,
                 company_name,
-                item.get('location', {}).get('name', 'Remote'),
-                'General',
-                'Full-Time',
+                item.get("location", {}).get("name", "Remote"),
+                "General",
+                "Full-Time",
                 clean_desc,
-                item.get('absolute_url', ''),
+                item.get("absolute_url", ""),
                 logo_url,
-                'ats',
-                'greenhouse',
-                item.get('updated_at', datetime.now(timezone.utc).isoformat())
+                "ats",
+                "greenhouse",
+                item.get("updated_at", datetime.now(timezone.utc).isoformat()),
             ))
         return jobs
     except Exception as e:
         print(f"[Greenhouse] Error fetching {slug}: {e}")
         return []
+
 
 def fetch_lever_jobs(company_name: str, slug: str, is_fallback: bool = False):
     url = f"https://api.lever.co/v0/postings/{slug}?mode=json"
@@ -252,8 +268,7 @@ def fetch_lever_jobs(company_name: str, slug: str, is_fallback: bool = False):
             if not is_fallback:
                 print(f"[Lever] {company_name} ({slug}) returned 404. Checking Greenhouse fallback...")
                 return fetch_greenhouse_jobs(company_name, slug)
-            else:
-                return []
+            return []
         if res.status_code != 200:
             print(f"[Lever] Failed {slug}: Status {res.status_code}")
             return []
@@ -262,31 +277,38 @@ def fetch_lever_jobs(company_name: str, slug: str, is_fallback: bool = False):
         logo_url = get_company_logo_fallback(company_name, slug=slug)
 
         for item in res.json():
-            title = item.get('text', '')
+            title = item.get("text", "")
             if not title:
                 continue
 
-            created_at = datetime.fromtimestamp(item['createdAt'] / 1000, tz=timezone.utc).isoformat() if 'createdAt' in item else datetime.now(timezone.utc).isoformat()
-            clean_desc = clean_html_description(item.get('descriptionPlain', '') or item.get('description', ''))
+            created_at = (
+                datetime.fromtimestamp(item["createdAt"] / 1000, tz=timezone.utc).isoformat()
+                if "createdAt" in item
+                else datetime.now(timezone.utc).isoformat()
+            )
+            clean_desc = clean_html_description(
+                item.get("descriptionPlain", "") or item.get("description", "")
+            )
 
             jobs.append((
                 generate_dedup_hash(title, company_name),
                 title,
                 company_name,
-                item.get('categories', {}).get('location', 'Remote'),
-                'General',
-                'Full-Time',
+                item.get("categories", {}).get("location", "Remote"),
+                "General",
+                "Full-Time",
                 clean_desc,
-                item.get('hostedUrl', ''),
+                item.get("hostedUrl", ""),
                 logo_url,
-                'ats',
-                'lever',
-                created_at
+                "ats",
+                "lever",
+                created_at,
             ))
         return jobs
     except Exception as e:
         print(f"[Lever] Error fetching {slug}: {e}")
         return []
+
 
 def fetch_ashby_jobs(company_name: str, slug: str):
     url = f"https://api.ashbyhq.com/posting-api/job-board/{slug}"
@@ -298,49 +320,50 @@ def fetch_ashby_jobs(company_name: str, slug: str):
 
         jobs = []
         data = res.json()
-        raw_logo = data.get('organizationLogoUrl', '')
+        raw_logo = data.get("organizationLogoUrl", "")
         logo_url = get_company_logo_fallback(company_name, direct_logo=raw_logo, slug=slug)
 
-        for item in data.get('jobs', []):
-            title = item.get('title', '')
+        for item in data.get("jobs", []):
+            title = item.get("title", "")
             if not title:
                 continue
 
-            clean_desc = clean_html_description(item.get('descriptionHtml', ''))
+            clean_desc = clean_html_description(item.get("descriptionHtml", ""))
 
             jobs.append((
                 generate_dedup_hash(title, company_name),
                 title,
                 company_name,
-                item.get('location', 'Remote'),
-                'General',
-                'Full-Time',
+                item.get("location", "Remote"),
+                "General",
+                "Full-Time",
                 clean_desc,
-                item.get('jobUrl', ''),
+                item.get("jobUrl", ""),
                 logo_url,
-                'ats',
-                'ashby',
-                item.get('publishedAt', datetime.now(timezone.utc).isoformat())
+                "ats",
+                "ashby",
+                item.get("publishedAt", datetime.now(timezone.utc).isoformat()),
             ))
         return jobs
     except Exception as e:
         print(f"[Ashby] Error fetching {slug}: {e}")
         return []
 
-# --- LAYER 3: AUTOMATED ATS DISCOVERY ---
+
+# --- LAYER 3: AUTOMATED ATS DISCOVERY (optional / limited) ---
 
 def auto_discover_company_ats(company_name: str, domain: str, cursor, conn):
-    """Sniffs a company website to detect which ATS platform they use and registers it in target_companies."""
+    """Sniff a company careers page and register ATS if detected."""
     clean_domain = domain.replace("https://", "").replace("http://", "").strip("/")
     url = f"https://{clean_domain}/careers"
-    headers = {'User-Agent': 'Mozilla/5.0'}
+    headers = {"User-Agent": "Mozilla/5.0"}
 
     try:
-        res = requests.get(url, headers=headers, timeout=8, allow_redirects=True)
+        res = requests.get(url, headers=headers, timeout=6, allow_redirects=True)
         html = res.text.lower()
 
         detected_ats = None
-        slug = company_name.lower().replace(" ", "")
+        slug = re.sub(r"[^a-z0-9]", "", company_name.lower())
 
         if "boards.greenhouse.io" in html or "greenhouse.io" in html:
             detected_ats = "greenhouse"
@@ -350,20 +373,24 @@ def auto_discover_company_ats(company_name: str, domain: str, cursor, conn):
             detected_ats = "ashby"
 
         if detected_ats:
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO public.target_companies (name, ats_type, ats_slug, is_active)
                 VALUES (%s, %s, %s, TRUE)
                 ON CONFLICT (ats_slug) DO UPDATE SET is_active = TRUE;
-            """, (company_name, detected_ats, slug))
+                """,
+                (company_name, detected_ats, slug),
+            )
             conn.commit()
             print(f"[Discovery] Detected {detected_ats.upper()} for {company_name} ({slug}). Added to targets.")
             return detected_ats, slug
     except Exception as e:
-        print(f"[Discovery] Could not sniff ATS for {company_name}: {e}")
+        # Keep quiet for noise; uncomment if you want verbose discovery logs
+        # print(f"[Discovery] Could not sniff ATS for {company_name}: {e}")
+        pass
 
     return None, None
 
-# --- DEDUPLICATION HELPER ---
 
 def deduplicate_jobs(jobs_list):
     """Filters out duplicate hashes within the current batch payload."""
@@ -373,36 +400,87 @@ def deduplicate_jobs(jobs_list):
         unique_jobs[dedup_hash] = job
     return list(unique_jobs.values())
 
-# --- DATABASE UPSERT & PIPELINE EXECUTOR ---
+
+def upsert_jobs_in_chunks(conn, clean_jobs):
+    """Reconnect-safe, chunked upsert into job_listings."""
+    upsert_query = """
+        INSERT INTO public.job_listings (
+            dedup_hash, title, company_name, location, category,
+            employment_type, description, apply_url, logo_url, source_type,
+            source_provider, posted_at
+        ) VALUES %s
+        ON CONFLICT (dedup_hash) DO UPDATE SET
+            title = EXCLUDED.title,
+            location = EXCLUDED.location,
+            description = EXCLUDED.description,
+            apply_url = EXCLUDED.apply_url,
+            logo_url = EXCLUDED.logo_url,
+            posted_at = EXCLUDED.posted_at,
+            updated_at = NOW();
+    """
+
+    total = len(clean_jobs)
+    inserted = 0
+
+    for i in range(0, total, UPSERT_CHUNK_SIZE):
+        chunk = clean_jobs[i : i + UPSERT_CHUNK_SIZE]
+        cursor = conn.cursor()
+        try:
+            execute_values(cursor, upsert_query, chunk)
+            conn.commit()
+            inserted += len(chunk)
+            print(f"Upserted chunk {i // UPSERT_CHUNK_SIZE + 1}: {len(chunk)} rows "
+                  f"({inserted}/{total})")
+        except Exception as e:
+            print(f"Chunk upsert failed at offset {i}: {e}")
+            if conn and not conn.closed:
+                conn.rollback()
+            # Try one reconnect + retry for this chunk
+            try:
+                conn.close()
+            except Exception:
+                pass
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            execute_values(cursor, upsert_query, chunk)
+            conn.commit()
+            inserted += len(chunk)
+            print(f"Retry succeeded for chunk at offset {i}")
+        finally:
+            cursor.close()
+
+    return conn, inserted
+
 
 def run_pipeline():
     conn = None
     try:
         conn = get_db_connection()
-        
-        # Immediate assertion step before running scrapers
         verify_connection_and_schema(conn)
 
         cursor = conn.cursor()
         cursor.execute("SET search_path TO public;")
 
-        # 1. Fetch active target companies from Postgres
-        cursor.execute("SELECT name, ats_type, ats_slug FROM public.target_companies WHERE is_active = TRUE;")
+        # 1. Fetch active target companies
+        cursor.execute(
+            "SELECT name, ats_type, ats_slug FROM public.target_companies WHERE is_active = TRUE;"
+        )
         targets = cursor.fetchall()
+        cursor.close()
 
         all_jobs = []
 
-        # 2. Layer 2: Extract ATS jobs dynamically
+        # 2. Layer 2: ATS companies
         for name, ats_type, slug in targets:
             print(f"Fetching jobs for {name} ({ats_type})...")
-            if ats_type == 'greenhouse':
+            if ats_type == "greenhouse":
                 all_jobs.extend(fetch_greenhouse_jobs(name, slug))
-            elif ats_type == 'lever':
+            elif ats_type == "lever":
                 all_jobs.extend(fetch_lever_jobs(name, slug))
-            elif ats_type == 'ashby':
+            elif ats_type == "ashby":
                 all_jobs.extend(fetch_ashby_jobs(name, slug))
 
-        # 3. Layer 1: Extract Global Feeds (RemoteOK + WeWorkRemotely)
+        # 3. Layer 1: Global feeds
         print("Fetching jobs from RemoteOK feed...")
         remoteok_jobs = fetch_remoteok_jobs()
         all_jobs.extend(remoteok_jobs)
@@ -413,65 +491,70 @@ def run_pipeline():
 
         print(f"Total extracted raw listings: {len(all_jobs)}")
 
-        # 3b. Auto-discover ATS for new companies found in the public feeds
-        print("Running automated ATS discovery on new companies...")
-        known_slugs = {t[2] for t in targets}  # already known ats_slugs
+        # 3b. Optional limited discovery (OFF by default)
+        if ENABLE_ATS_DISCOVERY:
+            print(f"Running limited ATS discovery (max {DISCOVERY_LIMIT})...")
+            known_slugs = {t[2] for t in targets}
+            new_companies = set()
 
-        # Collect unique company names from the public feeds
-        new_companies = set()
-        for job in remoteok_jobs + wwr_jobs:
-            # job structure is a tuple: (dedup_hash, title, company_name, ...)
-            company_name = job[2] if len(job) > 2 else None
-            if company_name and company_name.strip():
-                new_companies.add(company_name.strip())
+            for job in remoteok_jobs + wwr_jobs:
+                company_name = job[2] if len(job) > 2 else None
+                if company_name and company_name.strip():
+                    new_companies.add(company_name.strip())
 
-        for company_name in new_companies:
-            slug_guess = company_name.lower().replace(" ", "").replace(".", "")
-            if slug_guess in known_slugs:
-                continue  # already registered
+            tried = 0
+            cursor = conn.cursor()
+            for company_name in list(new_companies):
+                if tried >= DISCOVERY_LIMIT:
+                    break
 
-            # Try a simple domain guess (company.com)
-            domain_guess = f"{slug_guess}.com"
-            detected, slug = auto_discover_company_ats(company_name, domain_guess, cursor, conn)
-            if detected:
-                known_slugs.add(slug)
+                slug_guess = re.sub(r"[^a-z0-9]", "", company_name.lower())
+                if not slug_guess or slug_guess in known_slugs:
+                    continue
 
-        # 4. Filter batch-level duplicate hashes
+                domain_guess = f"{slug_guess}.com"
+                detected, slug = auto_discover_company_ats(
+                    company_name, domain_guess, cursor, conn
+                )
+                tried += 1
+                if detected:
+                    known_slugs.add(slug)
+            cursor.close()
+        else:
+            print("ATS discovery skipped (ENABLE_ATS_DISCOVERY = False).")
+
+        # 4. Deduplicate
         clean_jobs = deduplicate_jobs(all_jobs)
         print(f"Total unique listings to upsert: {len(clean_jobs)}")
 
-        # 5. Perform Atomic Batch Upsert into Postgres
-        upsert_query = """
-            INSERT INTO public.job_listings (
-                dedup_hash, title, company_name, location, category, 
-                employment_type, description, apply_url, logo_url, source_type, 
-                source_provider, posted_at
-            ) VALUES %s
-            ON CONFLICT (dedup_hash) DO UPDATE SET
-                title = EXCLUDED.title,
-                location = EXCLUDED.location,
-                description = EXCLUDED.description,
-                apply_url = EXCLUDED.apply_url,
-                logo_url = EXCLUDED.logo_url,
-                posted_at = EXCLUDED.posted_at,
-                updated_at = NOW();
-        """
-
+        # 5. Fresh connection + chunked upsert
         if clean_jobs:
-            execute_values(cursor, upsert_query, clean_jobs)
-            conn.commit()
-            print(f"Successfully upserted {len(clean_jobs)} records into Postgres!")
+            try:
+                if conn and not conn.closed:
+                    conn.close()
+            except Exception:
+                pass
+
+            conn = get_db_connection()
+            conn, inserted = upsert_jobs_in_chunks(conn, clean_jobs)
+            print(f"Successfully upserted {inserted} records into Postgres!")
         else:
             print("No new jobs to process.")
 
-        cursor.close()
     except Exception as e:
         print(f"Pipeline execution error: {e}")
-        if conn:
-            conn.rollback()
+        if conn and not conn.closed:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
     finally:
-        if conn:
-            conn.close()
+        if conn and not conn.closed:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
 
 if __name__ == "__main__":
     run_pipeline()
