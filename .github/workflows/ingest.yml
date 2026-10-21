@@ -2,14 +2,12 @@ name: Automated Job Ingestion Pipeline
 
 on:
   schedule:
-    # 15:00 UTC = 4:00 PM WAT (Nigeria) / 8:00 AM EDT (US East)
-    - cron: '0 15 * * *'
-  workflow_dispatch:      # Allows manual trigger via GitHub UI
+    - cron: '0 15 * * *'   # 15:00 UTC daily
+  workflow_dispatch:
 
 jobs:
   run-ingest:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -24,12 +22,21 @@ jobs:
           python -m pip install --upgrade pip
           pip install psycopg2-binary requests beautifulsoup4 python-dotenv
 
-      - name: Run Ingestion Pipeline
+      - name: Verify DATABASE_URL is set
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
-          if [ -f "ingest.py" ]; then
-            python ingest.py
-          else
-            python job-ingestion-engine/ingest.py
+          if [ -z "$DATABASE_URL" ]; then
+            echo "ERROR: secrets.DATABASE_URL is empty"
+            exit 1
           fi
+          # Print host only (no password)
+          echo "DATABASE host: $(echo "$DATABASE_URL" | sed -E 's|.*@([^/]+)/.*|\1|')"
+
+      - name: Run Ingestion Pipeline
+        working-directory: job-ingestion-engine
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set -e
+          python ingest.py
